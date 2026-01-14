@@ -79,6 +79,30 @@ def extrair_local_acao(texto):
         return 'porta-luvas'
     return 'desconhecido'
 
+def extrair_item_e_quantidade(texto):
+    """
+    Extrai o item e a quantidade da log.
+    Exemplo: "colocou money x200" -> ("money", 200)
+    Exemplo: "pegou black_money x90610" -> ("black_money", 90610)
+    """
+    # Regex para capturar: item e quantidade (x seguido de número)
+    pattern = r'(colocou|pegou)\s+(\S+)\s+x(\d+)'
+    match = re.search(pattern, texto.lower())
+    
+    if match:
+        item = match.group(2)
+        quantidade = int(match.group(3))
+        return (item, quantidade)
+    
+    return (None, 0)
+
+def formatar_numero(numero):
+    """
+    Formata número com pontos de milhar.
+    Exemplo: 20000 -> "20.000"
+    """
+    return f"{numero:,}".replace(",", ".")
+
 @client.event
 async def on_ready():
     print(f'🔍 Bot Verificador de Logs conectado como {client.user}')
@@ -134,6 +158,10 @@ async def on_message(message):
     tipo_acao = extrair_tipo_acao(texto_completo)
     local_acao = extrair_local_acao(texto_completo)
     
+    # Extrair item e quantidade
+    item, quantidade = extrair_item_e_quantidade(texto_completo)
+    quantidade_formatada = formatar_numero(quantidade) if quantidade > 0 else "?"
+    
     if not tipo_acao:
         print(f"[{agora}] ❌ Não conseguiu identificar ação (colocou/pegou)")
         return
@@ -141,7 +169,7 @@ async def on_message(message):
     # Chave única: license + tipo de ação + local
     chave = f"{license}_{tipo_acao}_{local_acao}"
     
-    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao}")
+    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | Item: {item} | Qtd: {quantidade_formatada}")
     
     # Limpeza do histórico antigo
     for key in list(log_history.keys()):
@@ -180,11 +208,22 @@ async def on_message(message):
         
         # Montar mensagem de alerta
         logs_resumo = []
+        total_quantidade = 0
+        item_tipo = None
+        
         for i, (ts, log) in enumerate(log_history[chave][-LOG_COUNT_THRESHOLD:], 1):
+            # Extrair item e quantidade de cada log
+            log_item, log_qtd = extrair_item_e_quantidade(log)
+            log_qtd_formatada = formatar_numero(log_qtd) if log_qtd > 0 else "?"
+            total_quantidade += log_qtd
+            if log_item:
+                item_tipo = log_item
+            
             # Extrair primeira linha (tipo de ação)
             primeira_linha = log.split('\n')[0] if '\n' in log else log[:50]
-            logs_resumo.append(f"**{i}.** {primeira_linha}")
+            logs_resumo.append(f"**{i}.** {primeira_linha} | **Quantidade: {log_qtd_formatada}**")
         
+        total_formatado = formatar_numero(total_quantidade)
         acao_texto = "COLOCOU" if tipo_acao == "colocou" else "PEGOU"
         
         alert_message = (
@@ -194,6 +233,8 @@ async def on_message(message):
             f"🔑 **License:** `{license}`\n"
             f"🆔 **ID no Servidor:** {player_id}\n"
             f"📦 **Ação:** {acao_texto} no {local_acao.upper()}\n"
+            f"💰 **Item:** {item_tipo or 'desconhecido'}\n"
+            f"💵 **Total movimentado:** {total_formatado}\n"
             f"⏱️ **{LOG_COUNT_THRESHOLD}x a mesma ação em menos de {TIME_WINDOW_SECONDS} segundos!**\n\n"
             f"📋 **Logs detectados:**\n" + "\n".join(logs_resumo) + "\n\n"
             f"⚠️ **Verifique este jogador imediatamente!**"
