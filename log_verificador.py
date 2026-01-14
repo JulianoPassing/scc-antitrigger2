@@ -90,14 +90,35 @@ def extrair_item_e_quantidade(texto):
     Exemplo: "colocou money x200" -> ("money", 200)
     Exemplo: "pegou black_money x90610" -> ("black_money", 90610)
     """
-    # Regex para capturar: item e quantidade (x seguido de número)
-    pattern = r'(colocou|pegou)\s+(\S+)\s+x(\d+)'
-    match = re.search(pattern, texto.lower())
+    # Regex mais flexível para capturar: item e quantidade
+    # Tenta vários padrões
+    patterns = [
+        r'(colocou|pegou)\s+(\S+)\s+x(\d+)',  # colocou money x200
+        r'(\S+)\s+x(\d+)',  # money x200 (sem colocou/pegou)
+        r'x(\d+)',  # só x200
+    ]
     
+    # Primeiro padrão completo
+    match = re.search(patterns[0], texto.lower())
     if match:
         item = match.group(2)
         quantidade = int(match.group(3))
         return (item, quantidade)
+    
+    # Segundo padrão (item x quantidade)
+    match = re.search(patterns[1], texto.lower())
+    if match:
+        item = match.group(1)
+        # Verificar se não é uma palavra comum
+        if item not in ['o', 'do', 'no', 'de', 'da', 'nas', 'nos', 'em']:
+            quantidade = int(match.group(2))
+            return (item, quantidade)
+    
+    # Terceiro padrão (só quantidade)
+    match = re.search(patterns[2], texto.lower())
+    if match:
+        quantidade = int(match.group(1))
+        return ('item', quantidade)
     
     return (None, 0)
 
@@ -114,12 +135,18 @@ def extrair_veiculo_id(texto):
     Exemplo: "do veículo glove02G0F98W" -> "glove02G0F98W"
     Exemplo: "do veículo trunkUQKI3439" -> "trunkUQKI3439"
     """
-    # Regex para capturar: glove ou trunk seguido do ID
-    pattern = r'veículo\s+((?:glove|trunk)[A-Za-z0-9]+)'
-    match = re.search(pattern, texto)
+    # Regex para capturar: glove ou trunk seguido do ID (com ou sem acento em veículo)
+    patterns = [
+        r'veículo\s+((?:glove|trunk)[A-Za-z0-9]+)',  # com acento
+        r'veiculo\s+((?:glove|trunk)[A-Za-z0-9]+)',  # sem acento
+        r'(glove[A-Za-z0-9]+)',  # só glove + ID
+        r'(trunk[A-Za-z0-9]+)',  # só trunk + ID
+    ]
     
-    if match:
-        return match.group(1)
+    for pattern in patterns:
+        match = re.search(pattern, texto)
+        if match:
+            return match.group(1)
     
     return None
 
@@ -193,6 +220,10 @@ async def on_message(message):
     item, quantidade = extrair_item_e_quantidade(texto_completo)
     quantidade_formatada = formatar_numero(quantidade) if quantidade > 0 else "?"
     
+    # Debug: se não encontrou quantidade, mostrar parte do texto
+    if quantidade == 0:
+        print(f"[{agora}] ⚠️ DEBUG - Não encontrou quantidade. Texto: {texto_completo[:200]}")
+    
     if not tipo_acao:
         print(f"[{agora}] ❌ Não conseguiu identificar ação (colocou/pegou)")
         return
@@ -203,6 +234,10 @@ async def on_message(message):
     # Extrair ID do veículo
     veiculo_id = extrair_veiculo_id(texto_completo)
     tipo_veiculo = extrair_tipo_veiculo(veiculo_id)
+    
+    # Debug: se não encontrou veículo, mostrar aviso
+    if not veiculo_id:
+        print(f"[{agora}] ⚠️ DEBUG - Não encontrou veículo no texto")
     
     print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | Item: {item} | Qtd: {quantidade_formatada} | Veículo: {veiculo_id or '?'}")
     
