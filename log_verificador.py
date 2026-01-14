@@ -40,17 +40,20 @@ def extrair_info_jogador(texto):
     
     Formatos esperados:
     - "O jogador JPZIN (license:1b0779c03eb4dd2f7ae1e2e74522aaa49069bf37, 275) colocou..."
-    - "O jogador lucaspirespsn (license:4125f3186251695bc985402d3a0409fc3781aa48, 40) pegou..."
+    - "O jogador **Jeeh** (license:...) pegou..." (com markdown)
     """
+    # Remover markdown ** do texto para facilitar o parsing
+    texto_limpo = texto.replace('**', '')
+    
     # Regex para capturar: nome do jogador, license e ID
     pattern = r'O jogador (\S+) \(license:([a-f0-9]+), (\d+)\)'
-    match = re.search(pattern, texto)
+    match = re.search(pattern, texto_limpo)
     
     if match:
         nome_jogador = match.group(1)
         license = match.group(2)
         player_id = match.group(3)
-        return (nome_jogador, license, player_id, texto)
+        return (nome_jogador, license, player_id, texto_limpo)
     
     return None
 
@@ -88,12 +91,16 @@ def extrair_item_e_quantidade(texto):
     """
     Extrai o item e a quantidade da log.
     Exemplo: "colocou money x200" -> "money x200"
+    Exemplo com markdown: "**money** x**200**" -> "money x200"
     Retorna a string completa "item xValor"
     """
+    # Remover markdown ** do texto
+    texto_limpo = texto.replace('**', '')
+    
     # Regex para capturar: qualquer palavra seguida de x e números
     # Exemplos: money x200, black_money x90610, dirty_money x1000
-    pattern = r'(\w+)\s+(x\d+)'
-    match = re.search(pattern, texto)
+    pattern = r'(\w+)\s+x(\d+)'
+    match = re.search(pattern, texto_limpo)
     
     if match:
         item = match.group(1)
@@ -101,7 +108,7 @@ def extrair_item_e_quantidade(texto):
         # Ignorar palavras comuns que não são itens
         palavras_ignorar = ['jogador', 'veiculo', 'veículo', 'coordenadas', 'license', 'trunk', 'glove']
         if item.lower() not in palavras_ignorar:
-            return f"{item} {quantidade}"
+            return f"{item} x{quantidade}"
     
     return "?"
 
@@ -312,10 +319,10 @@ async def on_message(message):
     
     # ========== SISTEMA DE DETECÇÃO DE SPAM (3x mesma ação) ==========
     
-    # Limpeza do histórico antigo
+    # Limpeza do histórico antigo (cada entrada tem 3 elementos: ts, linha, qtd)
     for key in list(log_history.keys()):
         entries = log_history[key]
-        valid_entries = [(ts, log) for ts, log in entries if (now - ts).total_seconds() < TIME_WINDOW_SECONDS]
+        valid_entries = [entry for entry in entries if (now - entry[0]).total_seconds() < TIME_WINDOW_SECONDS]
         if not valid_entries:
             del log_history[key]
         else:
