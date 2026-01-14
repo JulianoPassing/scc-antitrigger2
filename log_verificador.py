@@ -87,26 +87,23 @@ def extrair_local_acao(texto):
 def extrair_item_e_quantidade(texto):
     """
     Extrai o item e a quantidade da log.
-    Exemplo: "colocou money x200" -> ("money", "x200")
+    Exemplo: "colocou money x200" -> "money x200"
+    Retorna a string completa "item xValor"
     """
-    # Regex para capturar: item (money, black_money, etc) e xQuantidade
-    pattern = r'(money|black_money|dirty_money|cash)\s+(x\d+)'
-    match = re.search(pattern, texto.lower())
+    # Regex para capturar: qualquer palavra seguida de x e números
+    # Exemplos: money x200, black_money x90610, dirty_money x1000
+    pattern = r'(\w+)\s+(x\d+)'
+    match = re.search(pattern, texto)
     
     if match:
         item = match.group(1)
-        quantidade = match.group(2)  # mantém como string "x200"
-        return (item, quantidade)
+        quantidade = match.group(2)
+        # Ignorar palavras comuns que não são itens
+        palavras_ignorar = ['jogador', 'veiculo', 'veículo', 'coordenadas', 'license', 'trunk', 'glove']
+        if item.lower() not in palavras_ignorar:
+            return f"{item} {quantidade}"
     
-    # Fallback: tentar pegar qualquer x seguido de número
-    pattern2 = r'(\S+)\s+(x\d+)'
-    match2 = re.search(pattern2, texto.lower())
-    if match2:
-        item = match2.group(1)
-        quantidade = match2.group(2)
-        return (item, quantidade)
-    
-    return (None, "?")
+    return "?"
 
 def extrair_veiculo_id(texto):
     """
@@ -195,11 +192,11 @@ async def on_message(message):
     tipo_acao = extrair_tipo_acao(texto_completo)
     local_acao = extrair_local_acao(texto_completo)
     
-    # Extrair item e quantidade
-    item, quantidade = extrair_item_e_quantidade(texto_completo)
+    # Extrair item e quantidade (retorna string como "money x200")
+    item_quantidade = extrair_item_e_quantidade(texto_completo)
     
     # Debug: se não encontrou quantidade, mostrar parte do texto
-    if quantidade == "?":
+    if item_quantidade == "?":
         print(f"[{agora}] ⚠️ DEBUG - Não encontrou quantidade. Texto: {texto_completo[:200]}")
     
     if not tipo_acao:
@@ -217,7 +214,7 @@ async def on_message(message):
     if not veiculo_id:
         print(f"[{agora}] ⚠️ DEBUG - Não encontrou veículo no texto")
     
-    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | Item: {item} | Qtd: {quantidade} | Veículo: {veiculo_id or '?'}")
+    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | {item_quantidade} | Veículo: {veiculo_id or '?'}")
     
     # ========== SISTEMA DE DETECÇÃO DE TRANSFERÊNCIAS ==========
     if veiculo_id:
@@ -238,8 +235,7 @@ async def on_message(message):
                 'jogador': nome_jogador,
                 'license': license,
                 'player_id': player_id,
-                'item': item,
-                'quantidade': quantidade,
+                'item_quantidade': item_quantidade,
                 'local': local_acao
             }
             print(f"[{agora}] 💾 Depósito registrado no veículo {veiculo_id}")
@@ -271,7 +267,7 @@ async def on_message(message):
                                 f"👤 **Jogador:** {deposito['jogador']}\n"
                                 f"🔑 **License:** `{deposito['license']}`\n"
                                 f"🆔 **ID:** {deposito['player_id']}\n"
-                                f"💰 **Colocou:** {deposito['item'] or 'item'} {deposito['quantidade']}"
+                                f"💰 **Colocou:** {deposito['item_quantidade']}"
                             ),
                             inline=False
                         )
@@ -281,7 +277,7 @@ async def on_message(message):
                                 f"👤 **Jogador:** {nome_jogador}\n"
                                 f"🔑 **License:** `{license}`\n"
                                 f"🆔 **ID:** {player_id}\n"
-                                f"💰 **Pegou:** {item or 'item'} {quantidade}"
+                                f"💰 **Pegou:** {item_quantidade}"
                             ),
                             inline=False
                         )
@@ -350,17 +346,17 @@ async def on_message(message):
         
         # Montar embed de alerta de spam (VERMELHO)
         logs_resumo = []
-        item_tipo = None
+        item_qtd_atual = None
         
         for i, (ts, log) in enumerate(log_history[chave][-LOG_COUNT_THRESHOLD:], 1):
-            # Extrair item e quantidade de cada log
-            log_item, log_qtd = extrair_item_e_quantidade(log)
-            if log_item:
-                item_tipo = log_item
+            # Extrair item e quantidade de cada log (retorna string "money x200")
+            log_item_qtd = extrair_item_e_quantidade(log)
+            if log_item_qtd != "?":
+                item_qtd_atual = log_item_qtd
             
             # Extrair primeira linha (tipo de ação)
             primeira_linha = log.split('\n')[0] if '\n' in log else log[:50]
-            logs_resumo.append(f"**{i}.** {primeira_linha} | **Qtd: {log_qtd}**")
+            logs_resumo.append(f"**{i}.** {primeira_linha} | **{log_item_qtd}**")
         
         acao_texto = "COLOCOU" if tipo_acao == "colocou" else "PEGOU"
         
@@ -379,8 +375,8 @@ async def on_message(message):
             inline=True
         )
         spam_embed.add_field(
-            name="💰 Item",
-            value=item_tipo or 'desconhecido',
+            name="💰 Item/Qtd",
+            value=item_qtd_atual or '?',
             inline=True
         )
         spam_embed.add_field(
