@@ -87,47 +87,26 @@ def extrair_local_acao(texto):
 def extrair_item_e_quantidade(texto):
     """
     Extrai o item e a quantidade da log.
-    Exemplo: "colocou money x200" -> ("money", 200)
-    Exemplo: "pegou black_money x90610" -> ("black_money", 90610)
+    Exemplo: "colocou money x200" -> ("money", "x200")
     """
-    # Regex mais flexível para capturar: item e quantidade
-    # Tenta vários padrões
-    patterns = [
-        r'(colocou|pegou)\s+(\S+)\s+x(\d+)',  # colocou money x200
-        r'(\S+)\s+x(\d+)',  # money x200 (sem colocou/pegou)
-        r'x(\d+)',  # só x200
-    ]
+    # Regex para capturar: item (money, black_money, etc) e xQuantidade
+    pattern = r'(money|black_money|dirty_money|cash)\s+(x\d+)'
+    match = re.search(pattern, texto.lower())
     
-    # Primeiro padrão completo
-    match = re.search(patterns[0], texto.lower())
-    if match:
-        item = match.group(2)
-        quantidade = int(match.group(3))
-        return (item, quantidade)
-    
-    # Segundo padrão (item x quantidade)
-    match = re.search(patterns[1], texto.lower())
     if match:
         item = match.group(1)
-        # Verificar se não é uma palavra comum
-        if item not in ['o', 'do', 'no', 'de', 'da', 'nas', 'nos', 'em']:
-            quantidade = int(match.group(2))
-            return (item, quantidade)
+        quantidade = match.group(2)  # mantém como string "x200"
+        return (item, quantidade)
     
-    # Terceiro padrão (só quantidade)
-    match = re.search(patterns[2], texto.lower())
-    if match:
-        quantidade = int(match.group(1))
-        return ('item', quantidade)
+    # Fallback: tentar pegar qualquer x seguido de número
+    pattern2 = r'(\S+)\s+(x\d+)'
+    match2 = re.search(pattern2, texto.lower())
+    if match2:
+        item = match2.group(1)
+        quantidade = match2.group(2)
+        return (item, quantidade)
     
-    return (None, 0)
-
-def formatar_numero(numero):
-    """
-    Formata número com pontos de milhar.
-    Exemplo: 20000 -> "20.000"
-    """
-    return f"{numero:,}".replace(",", ".")
+    return (None, "?")
 
 def extrair_veiculo_id(texto):
     """
@@ -218,10 +197,9 @@ async def on_message(message):
     
     # Extrair item e quantidade
     item, quantidade = extrair_item_e_quantidade(texto_completo)
-    quantidade_formatada = formatar_numero(quantidade) if quantidade > 0 else "?"
     
     # Debug: se não encontrou quantidade, mostrar parte do texto
-    if quantidade == 0:
+    if quantidade == "?":
         print(f"[{agora}] ⚠️ DEBUG - Não encontrou quantidade. Texto: {texto_completo[:200]}")
     
     if not tipo_acao:
@@ -239,7 +217,7 @@ async def on_message(message):
     if not veiculo_id:
         print(f"[{agora}] ⚠️ DEBUG - Não encontrou veículo no texto")
     
-    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | Item: {item} | Qtd: {quantidade_formatada} | Veículo: {veiculo_id or '?'}")
+    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | Item: {item} | Qtd: {quantidade} | Veículo: {veiculo_id or '?'}")
     
     # ========== SISTEMA DE DETECÇÃO DE TRANSFERÊNCIAS ==========
     if veiculo_id:
@@ -282,30 +260,48 @@ async def on_message(message):
                         # Marcar como alertado
                         alerted_transfers[transfer_key] = now
                         
-                        # Montar mensagem de alerta de transferência
-                        transfer_alert = (
-                            f"@everyone\n"
-                            f"🔄 **TRANSFERÊNCIA SUSPEITA DETECTADA!** 🔄\n\n"
-                            f"📥 **DEPÓSITO:**\n"
-                            f"👤 **Jogador:** {deposito['jogador']}\n"
-                            f"🔑 **License:** `{deposito['license']}`\n"
-                            f"🆔 **ID:** {deposito['player_id']}\n"
-                            f"💰 **Colocou:** {deposito['item'] or 'item'} x{formatar_numero(deposito['quantidade'])}\n\n"
-                            f"📤 **RETIRADA:**\n"
-                            f"👤 **Jogador:** {nome_jogador}\n"
-                            f"🔑 **License:** `{license}`\n"
-                            f"🆔 **ID:** {player_id}\n"
-                            f"💰 **Pegou:** {item or 'item'} x{quantidade_formatada}\n\n"
-                            f"🚗 **Veículo:** `{veiculo_id}` ({tipo_veiculo})\n"
-                            f"⏱️ **Tempo entre ações:** menos de {TIME_WINDOW_SECONDS} segundos\n\n"
-                            f"⚠️ **Possível transferência de itens entre jogadores!**"
+                        # Montar embed de alerta de transferência (VERDE)
+                        transfer_embed = discord.Embed(
+                            title="🔄 TRANSFERÊNCIA SUSPEITA DETECTADA! 🔄",
+                            color=0x00FF00  # Verde
                         )
+                        transfer_embed.add_field(
+                            name="📥 DEPÓSITO",
+                            value=(
+                                f"👤 **Jogador:** {deposito['jogador']}\n"
+                                f"🔑 **License:** `{deposito['license']}`\n"
+                                f"🆔 **ID:** {deposito['player_id']}\n"
+                                f"💰 **Colocou:** {deposito['item'] or 'item'} {deposito['quantidade']}"
+                            ),
+                            inline=False
+                        )
+                        transfer_embed.add_field(
+                            name="📤 RETIRADA",
+                            value=(
+                                f"👤 **Jogador:** {nome_jogador}\n"
+                                f"🔑 **License:** `{license}`\n"
+                                f"🆔 **ID:** {player_id}\n"
+                                f"💰 **Pegou:** {item or 'item'} {quantidade}"
+                            ),
+                            inline=False
+                        )
+                        transfer_embed.add_field(
+                            name="🚗 VEÍCULO",
+                            value=f"`{veiculo_id}` ({tipo_veiculo})",
+                            inline=True
+                        )
+                        transfer_embed.add_field(
+                            name="⏱️ TEMPO",
+                            value=f"Menos de {TIME_WINDOW_SECONDS} segundos",
+                            inline=True
+                        )
+                        transfer_embed.set_footer(text="⚠️ Possível transferência de itens entre jogadores!")
                         
                         # Enviar alerta de transferência
                         try:
                             alert_channel = client.get_channel(ALERT_CHANNEL_ID)
                             if alert_channel:
-                                await alert_channel.send(transfer_alert)
+                                await alert_channel.send(content="@everyone", embed=transfer_embed)
                                 print(f"[{agora}] ✅ Alerta de TRANSFERÊNCIA enviado!")
                             else:
                                 print(f"[{agora}] ❌ Canal de alerta não encontrado")
@@ -352,45 +348,68 @@ async def on_message(message):
         # Marcar como já alertado
         alerted_keys[chave] = now
         
-        # Montar mensagem de alerta
+        # Montar embed de alerta de spam (VERMELHO)
         logs_resumo = []
-        total_quantidade = 0
         item_tipo = None
         
         for i, (ts, log) in enumerate(log_history[chave][-LOG_COUNT_THRESHOLD:], 1):
             # Extrair item e quantidade de cada log
             log_item, log_qtd = extrair_item_e_quantidade(log)
-            log_qtd_formatada = formatar_numero(log_qtd) if log_qtd > 0 else "?"
-            total_quantidade += log_qtd
             if log_item:
                 item_tipo = log_item
             
             # Extrair primeira linha (tipo de ação)
             primeira_linha = log.split('\n')[0] if '\n' in log else log[:50]
-            logs_resumo.append(f"**{i}.** {primeira_linha} | **Quantidade: {log_qtd_formatada}**")
+            logs_resumo.append(f"**{i}.** {primeira_linha} | **Qtd: {log_qtd}**")
         
-        total_formatado = formatar_numero(total_quantidade)
         acao_texto = "COLOCOU" if tipo_acao == "colocou" else "PEGOU"
         
-        alert_message = (
-            f"@everyone\n"
-            f"🚨 **ALERTA DE ATIVIDADE SUSPEITA DETECTADA!** 🚨\n\n"
-            f"👤 **Jogador:** {nome_jogador}\n"
-            f"🔑 **License:** `{license}`\n"
-            f"🆔 **ID no Servidor:** {player_id}\n"
-            f"📦 **Ação:** {acao_texto} no {local_acao.upper()}\n"
-            f"💰 **Item:** {item_tipo or 'desconhecido'}\n"
-            f"💵 **Total movimentado:** {total_formatado}\n"
-            f"⏱️ **{LOG_COUNT_THRESHOLD}x a mesma ação em menos de {TIME_WINDOW_SECONDS} segundos!**\n\n"
-            f"📋 **Logs detectados:**\n" + "\n".join(logs_resumo) + "\n\n"
-            f"⚠️ **Verifique este jogador imediatamente!**"
+        spam_embed = discord.Embed(
+            title="🚨 ALERTA DE ATIVIDADE SUSPEITA DETECTADA! 🚨",
+            color=0xFF0000  # Vermelho
         )
+        spam_embed.add_field(
+            name="👤 Jogador",
+            value=nome_jogador,
+            inline=True
+        )
+        spam_embed.add_field(
+            name="🆔 ID",
+            value=player_id,
+            inline=True
+        )
+        spam_embed.add_field(
+            name="💰 Item",
+            value=item_tipo or 'desconhecido',
+            inline=True
+        )
+        spam_embed.add_field(
+            name="🔑 License",
+            value=f"`{license}`",
+            inline=False
+        )
+        spam_embed.add_field(
+            name="📦 Ação",
+            value=f"{acao_texto} no {local_acao.upper()}",
+            inline=True
+        )
+        spam_embed.add_field(
+            name="⏱️ Frequência",
+            value=f"{LOG_COUNT_THRESHOLD}x em {TIME_WINDOW_SECONDS}s",
+            inline=True
+        )
+        spam_embed.add_field(
+            name="📋 Logs detectados",
+            value="\n".join(logs_resumo),
+            inline=False
+        )
+        spam_embed.set_footer(text="⚠️ Verifique este jogador imediatamente!")
         
         # Enviar alerta
         try:
             alert_channel = client.get_channel(ALERT_CHANNEL_ID)
             if alert_channel:
-                await alert_channel.send(alert_message)
+                await alert_channel.send(content="@everyone", embed=spam_embed)
                 print(f"✅ Alerta enviado para canal: {ALERT_CHANNEL_ID}")
             else:
                 print(f"❌ Canal de alerta não encontrado: {ALERT_CHANNEL_ID}")
