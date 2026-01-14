@@ -195,9 +195,12 @@ async def on_message(message):
     # Extrair item e quantidade (retorna string como "money x200")
     item_quantidade = extrair_item_e_quantidade(texto_completo)
     
+    # Debug: mostrar sempre o que foi extraído
+    print(f"[{agora}] 🔍 DEBUG - Item/Qtd extraído: '{item_quantidade}'")
+    
     # Debug: se não encontrou quantidade, mostrar parte do texto
     if item_quantidade == "?":
-        print(f"[{agora}] ⚠️ DEBUG - Não encontrou quantidade. Texto: {texto_completo[:200]}")
+        print(f"[{agora}] ⚠️ DEBUG - Texto completo: {repr(texto_completo[:300])}")
     
     if not tipo_acao:
         print(f"[{agora}] ❌ Não conseguiu identificar ação (colocou/pegou)")
@@ -328,10 +331,13 @@ async def on_message(message):
         print(f"[{agora}] ⚠️ Jogador {nome_jogador} ({tipo_acao}) já foi alertado recentemente, ignorando...")
         return
     
-    # Adicionar ao histórico
+    # Adicionar ao histórico (salva timestamp, primeira linha e item_quantidade)
     if chave not in log_history:
         log_history[chave] = []
-    log_history[chave].append((now, log_texto))
+    
+    # Extrair primeira linha para o resumo
+    primeira_linha = log_texto.split('\n')[0] if '\n' in log_texto else log_texto[:60]
+    log_history[chave].append((now, primeira_linha, item_quantidade))
     
     log_count = len(log_history[chave])
     
@@ -346,17 +352,12 @@ async def on_message(message):
         
         # Montar embed de alerta de spam (VERMELHO)
         logs_resumo = []
-        item_qtd_atual = None
+        item_qtd_atual = item_quantidade
         
-        for i, (ts, log) in enumerate(log_history[chave][-LOG_COUNT_THRESHOLD:], 1):
-            # Extrair item e quantidade de cada log (retorna string "money x200")
-            log_item_qtd = extrair_item_e_quantidade(log)
-            if log_item_qtd != "?":
-                item_qtd_atual = log_item_qtd
-            
-            # Extrair primeira linha (tipo de ação)
-            primeira_linha = log.split('\n')[0] if '\n' in log else log[:50]
-            logs_resumo.append(f"**{i}.** {primeira_linha} | **{log_item_qtd}**")
+        for i, (ts, linha, qtd) in enumerate(log_history[chave][-LOG_COUNT_THRESHOLD:], 1):
+            if qtd != "?":
+                item_qtd_atual = qtd
+            logs_resumo.append(f"**{i}.** {linha[:40]}... | **{qtd}**")
         
         acao_texto = "COLOCOU" if tipo_acao == "colocou" else "PEGOU"
         
