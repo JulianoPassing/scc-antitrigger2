@@ -86,19 +86,28 @@ async def on_message(message):
             if embed.description:
                 texto_completo += " " + embed.description
     
+    # Mostrar timestamp
+    agora = datetime.datetime.now().strftime("%H:%M:%S")
+    
+    # Mostrar log recebida (primeira linha ou primeiros 80 caracteres)
+    preview = texto_completo.split('\n')[0][:80] if texto_completo else "(vazio)"
+    print(f"[{agora}] 📨 Log recebida: {preview}")
+    
     # Verificar se é uma log de porta-malas ou porta-luvas
     if not eh_log_porta_malas_ou_luvas(texto_completo):
+        print(f"[{agora}] ⏭️ Ignorada (não é porta-malas/porta-luvas)")
         return
     
     # Extrair informações do jogador
     info = extrair_info_jogador(texto_completo)
     if not info:
+        print(f"[{agora}] ❌ Não conseguiu extrair jogador da log")
         return
     
     nome_jogador, license, player_id, log_texto = info
     now = datetime.datetime.now()
     
-    print(f"📋 Log detectado - Jogador: {nome_jogador} | License: {license[:10]}... | ID: {player_id}")
+    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | License: {license[:10]}... | ID: {player_id}")
     
     # Limpeza do histórico antigo
     for key in list(log_history.keys()):
@@ -116,7 +125,7 @@ async def on_message(message):
     
     # Verificar se este jogador já disparou alerta recentemente
     if license in alerted_licenses:
-        print(f"⏭️ Jogador {nome_jogador} já foi alertado recentemente, ignorando...")
+        print(f"[{agora}] ⚠️ Jogador {nome_jogador} já foi alertado recentemente, ignorando...")
         return
     
     # Adicionar ao histórico
@@ -126,11 +135,11 @@ async def on_message(message):
     
     log_count = len(log_history[license])
     
-    print(f"📊 Contagem para {nome_jogador}: {log_count}/{LOG_COUNT_THRESHOLD}")
+    print(f"[{agora}] 📊 Contagem para {nome_jogador}: {log_count}/{LOG_COUNT_THRESHOLD}")
     
     # Verificar se atingiu o limite
     if log_count >= LOG_COUNT_THRESHOLD:
-        print(f"🚨 ALERTA DISPARADO para jogador: {nome_jogador} (License: {license})")
+        print(f"[{agora}] 🚨 ALERTA DISPARADO para jogador: {nome_jogador} (License: {license})")
         
         # Marcar como já alertado
         alerted_licenses[license] = now
