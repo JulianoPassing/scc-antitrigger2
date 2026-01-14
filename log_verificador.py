@@ -28,6 +28,11 @@ client = discord.Client(intents=intents)
 log_history = {}  # Formato: {license_acao: [(timestamp, log_info), ...]}
 alerted_keys = {}  # Chaves (license+acao) que já dispararam alerta
 
+# --- MEMÓRIA PARA TRANSFERÊNCIAS ---
+# Formato: {veiculo_id: {timestamp, jogador, license, player_id, item, quantidade, local}}
+depositos_veiculos = {}
+alerted_transfers = {}  # Transferências já alertadas
+
 def extrair_info_jogador(texto):
     """
     Extrai informações do jogador da mensagem de log.
@@ -103,6 +108,32 @@ def formatar_numero(numero):
     """
     return f"{numero:,}".replace(",", ".")
 
+def extrair_veiculo_id(texto):
+    """
+    Extrai o ID do veículo da log.
+    Exemplo: "do veículo glove02G0F98W" -> "glove02G0F98W"
+    Exemplo: "do veículo trunkUQKI3439" -> "trunkUQKI3439"
+    """
+    # Regex para capturar: glove ou trunk seguido do ID
+    pattern = r'veículo\s+((?:glove|trunk)[A-Za-z0-9]+)'
+    match = re.search(pattern, texto)
+    
+    if match:
+        return match.group(1)
+    
+    return None
+
+def extrair_tipo_veiculo(veiculo_id):
+    """
+    Retorna se é glove (porta-luvas) ou trunk (porta-malas).
+    """
+    if veiculo_id:
+        if veiculo_id.startswith('glove'):
+            return 'PORTA-LUVAS'
+        elif veiculo_id.startswith('trunk'):
+            return 'PORTA-MALAS'
+    return 'DESCONHECIDO'
+
 @client.event
 async def on_ready():
     print(f'🔍 Bot Verificador de Logs conectado como {client.user}')
@@ -169,7 +200,87 @@ async def on_message(message):
     # Chave única: license + tipo de ação + local
     chave = f"{license}_{tipo_acao}_{local_acao}"
     
-    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | Item: {item} | Qtd: {quantidade_formatada}")
+    # Extrair ID do veículo
+    veiculo_id = extrair_veiculo_id(texto_completo)
+    tipo_veiculo = extrair_tipo_veiculo(veiculo_id)
+    
+    print(f"[{agora}] ✅ VÁLIDA - Jogador: {nome_jogador} | Ação: {tipo_acao.upper()} | Local: {local_acao} | Item: {item} | Qtd: {quantidade_formatada} | Veículo: {veiculo_id or '?'}")
+    
+    # ========== SISTEMA DE DETECÇÃO DE TRANSFERÊNCIAS ==========
+    if veiculo_id:
+        # Limpar depósitos antigos (mais de 60 segundos)
+        for vid in list(depositos_veiculos.keys()):
+            if (now - depositos_veiculos[vid]['timestamp']).total_seconds() >= TIME_WINDOW_SECONDS:
+                del depositos_veiculos[vid]
+        
+        # Limpar alertas de transferência antigos
+        for key in list(alerted_transfers.keys()):
+            if (now - alerted_transfers[key]).total_seconds() >= TIME_WINDOW_SECONDS:
+                del alerted_transfers[key]
+        
+        if tipo_acao == 'colocou':
+            # Registrar depósito no veículo
+            depositos_veiculos[veiculo_id] = {
+                'timestamp': now,
+                'jogador': nome_jogador,
+                'license': license,
+                'player_id': player_id,
+                'item': item,
+                'quantidade': quantidade,
+                'local': local_acao
+            }
+            print(f"[{agora}] 💾 Depósito registrado no veículo {veiculo_id}")
+        
+        elif tipo_acao == 'pegou':
+            # Verificar se existe depósito recente de OUTRO jogador neste veículo
+            if veiculo_id in depositos_veiculos:
+                deposito = depositos_veiculos[veiculo_id]
+                
+                # Verificar se é outro jogador
+                if deposito['license'] != license:
+                    # Chave única para evitar alertas duplicados
+                    transfer_key = f"{veiculo_id}_{deposito['license']}_{license}"
+                    
+                    if transfer_key not in alerted_transfers:
+                        print(f"[{agora}] 🔄 TRANSFERÊNCIA DETECTADA no veículo {veiculo_id}!")
+                        
+                        # Marcar como alertado
+                        alerted_transfers[transfer_key] = now
+                        
+                        # Montar mensagem de alerta de transferência
+                        transfer_alert = (
+                            f"@everyone\n"
+                            f"🔄 **TRANSFERÊNCIA SUSPEITA DETECTADA!** 🔄\n\n"
+                            f"📥 **DEPÓSITO:**\n"
+                            f"👤 **Jogador:** {deposito['jogador']}\n"
+                            f"🔑 **License:** `{deposito['license']}`\n"
+                            f"🆔 **ID:** {deposito['player_id']}\n"
+                            f"💰 **Colocou:** {deposito['item'] or 'item'} x{formatar_numero(deposito['quantidade'])}\n\n"
+                            f"📤 **RETIRADA:**\n"
+                            f"👤 **Jogador:** {nome_jogador}\n"
+                            f"🔑 **License:** `{license}`\n"
+                            f"🆔 **ID:** {player_id}\n"
+                            f"💰 **Pegou:** {item or 'item'} x{quantidade_formatada}\n\n"
+                            f"🚗 **Veículo:** `{veiculo_id}` ({tipo_veiculo})\n"
+                            f"⏱️ **Tempo entre ações:** menos de {TIME_WINDOW_SECONDS} segundos\n\n"
+                            f"⚠️ **Possível transferência de itens entre jogadores!**"
+                        )
+                        
+                        # Enviar alerta de transferência
+                        try:
+                            alert_channel = client.get_channel(ALERT_CHANNEL_ID)
+                            if alert_channel:
+                                await alert_channel.send(transfer_alert)
+                                print(f"[{agora}] ✅ Alerta de TRANSFERÊNCIA enviado!")
+                            else:
+                                print(f"[{agora}] ❌ Canal de alerta não encontrado")
+                        except Exception as e:
+                            print(f"[{agora}] ❌ ERRO ao enviar alerta de transferência: {e}")
+                        
+                        # Remover o depósito após alertar
+                        del depositos_veiculos[veiculo_id]
+    
+    # ========== SISTEMA DE DETECÇÃO DE SPAM (3x mesma ação) ==========
     
     # Limpeza do histórico antigo
     for key in list(log_history.keys()):
