@@ -45,8 +45,9 @@ def extrair_info_jogador(texto):
     # Remover markdown ** do texto para facilitar o parsing
     texto_limpo = texto.replace('**', '')
     
-    # Regex para capturar: nome do jogador, license e ID
-    pattern = r'O jogador (\S+) \(license:([a-f0-9]+), (\d+)\)'
+    # Regex para capturar: nome do jogador (pode ter espaços), license e ID
+    # Usa .+? para capturar tudo até encontrar (license:
+    pattern = r'O jogador (.+?) \(license:([a-f0-9]+), (\d+)\)'
     match = re.search(pattern, texto_limpo)
     
     if match:
@@ -213,7 +214,7 @@ async def on_message(message):
         print(f"[{agora}] ❌ Não conseguiu identificar ação (colocou/pegou)")
         return
     
-    # Chave única: license + tipo de ação + local
+    # Chave única: license + tipo de ação + local (NÃO inclui valor, então conta independente do valor)
     chave = f"{license}_{tipo_acao}_{local_acao}"
     
     # Extrair ID do veículo
@@ -343,7 +344,16 @@ async def on_message(message):
     
     log_count = len(log_history[chave])
     
-    print(f"[{agora}] 📊 Contagem para {nome_jogador} ({tipo_acao.upper()} {local_acao}): {log_count}/{LOG_COUNT_THRESHOLD}")
+    # Mostrar valores diferentes se houver
+    valores_unicos = set()
+    for _, _, qtd in log_history[chave]:
+        if qtd != "?":
+            valores_unicos.add(qtd)
+    
+    if len(valores_unicos) > 1:
+        print(f"[{agora}] 📊 Contagem para {nome_jogador} ({tipo_acao.upper()} {local_acao}): {log_count}/{LOG_COUNT_THRESHOLD} | Valores diferentes: {', '.join(valores_unicos)}")
+    else:
+        print(f"[{agora}] 📊 Contagem para {nome_jogador} ({tipo_acao.upper()} {local_acao}): {log_count}/{LOG_COUNT_THRESHOLD}")
     
     # Verificar se atingiu o limite
     if log_count >= LOG_COUNT_THRESHOLD:
@@ -364,10 +374,19 @@ async def on_message(message):
         # Montar embed de alerta de spam (VERMELHO)
         logs_resumo = []
         item_qtd_atual = item_quantidade
+        valores_diferentes = []
+        total_valor = 0
         
         for i, (ts, linha, qtd) in enumerate(log_history[chave][-LOG_COUNT_THRESHOLD:], 1):
             if qtd != "?":
                 item_qtd_atual = qtd
+                # Extrair valor numérico para calcular total
+                match_valor = re.search(r'x(\d+)', qtd)
+                if match_valor:
+                    valor = int(match_valor.group(1))
+                    total_valor += valor
+                    if qtd not in valores_diferentes:
+                        valores_diferentes.append(qtd)
             logs_resumo.append(f"**{i}.** {linha[:40]}... | **{qtd}**")
         
         acao_texto = "COLOCOU" if tipo_acao == "colocou" else "PEGOU"
@@ -419,6 +438,14 @@ async def on_message(message):
             value=f"{LOG_COUNT_THRESHOLD}x em {TIME_WINDOW_SECONDS}s",
             inline=True
         )
+        # Mostrar valores diferentes e total se houver múltiplos valores
+        if len(valores_diferentes) > 1:
+            total_formatado = f"{total_valor:,}".replace(",", ".")
+            spam_embed.add_field(
+                name="💵 Valores diferentes detectados",
+                value=f"{', '.join(valores_diferentes)}\n**Total: x{total_formatado}**",
+                inline=False
+            )
         if vezes_alertado > 1:
             spam_embed.add_field(
                 name="⚠️ REINCIDÊNCIA",
