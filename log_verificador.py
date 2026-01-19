@@ -26,7 +26,7 @@ client = discord.Client(intents=intents)
 
 # --- MEMÓRIA DO BOT ---
 log_history = {}  # Formato: {license_acao: [(timestamp, log_info), ...]}
-alerted_keys = {}  # Chaves (license+acao) que já dispararam alerta
+alerted_keys = {}  # Chaves (license+acao) que já dispararam alerta: {chave: {timestamp, count}}
 
 # --- MEMÓRIA PARA TRANSFERÊNCIAS ---
 # Formato: {veiculo_id: {timestamp, jogador, license, player_id, item, quantidade, local}}
@@ -328,15 +328,10 @@ async def on_message(message):
         else:
             log_history[key] = valid_entries
     
-    # Limpeza das chaves já alertadas
+    # Limpeza das chaves já alertadas (mantém histórico de alertas, mas limpa após 5 minutos)
     for key in list(alerted_keys.keys()):
-        if (now - alerted_keys[key]).total_seconds() >= TIME_WINDOW_SECONDS:
+        if (now - alerted_keys[key]['timestamp']).total_seconds() >= 300:  # 5 minutos
             del alerted_keys[key]
-    
-    # Verificar se esta combinação já disparou alerta recentemente
-    if chave in alerted_keys:
-        print(f"[{agora}] ⚠️ Jogador {nome_jogador} ({tipo_acao}) já foi alertado recentemente, ignorando...")
-        return
     
     # Adicionar ao histórico (salva timestamp, primeira linha e item_quantidade)
     if chave not in log_history:
@@ -352,10 +347,19 @@ async def on_message(message):
     
     # Verificar se atingiu o limite
     if log_count >= LOG_COUNT_THRESHOLD:
-        print(f"[{agora}] 🚨 ALERTA DISPARADO para jogador: {nome_jogador} ({tipo_acao.upper()} {local_acao})")
+        # Contar quantas vezes já foi alertado
+        vezes_alertado = 0
+        if chave in alerted_keys:
+            vezes_alertado = alerted_keys[chave]['count']
         
-        # Marcar como já alertado
-        alerted_keys[chave] = now
+        # Atualizar contador de alertas
+        if chave not in alerted_keys:
+            alerted_keys[chave] = {'timestamp': now, 'count': 1}
+        else:
+            alerted_keys[chave]['count'] += 1
+            vezes_alertado = alerted_keys[chave]['count']
+        
+        print(f"[{agora}] 🚨 ALERTA DISPARADO para jogador: {nome_jogador} ({tipo_acao.upper()} {local_acao}) - {vezes_alertado}ª vez")
         
         # Montar embed de alerta de spam (VERMELHO)
         logs_resumo = []
@@ -368,9 +372,22 @@ async def on_message(message):
         
         acao_texto = "COLOCOU" if tipo_acao == "colocou" else "PEGOU"
         
+        # Se for reincidente, tornar mais chamativo
+        if vezes_alertado > 1:
+            # Cor mais intensa (vermelho escuro) e título mais chamativo
+            cor_embed = 0x8B0000  # Vermelho escuro
+            titulo = f"🚨🚨🚨 REINCIDENTE! ALERTA #{vezes_alertado} - ATIVIDADE SUSPEITA! 🚨🚨🚨"
+            mentions = "@everyone @everyone @everyone"  # 3x mentions
+            footer_text = f"⚠️⚠️⚠️ JOGADOR REINCIDENTE! Já foi alertado {vezes_alertado} vezes! AÇÃO URGENTE NECESSÁRIA! ⚠️⚠️⚠️"
+        else:
+            cor_embed = 0xFF0000  # Vermelho normal
+            titulo = "🚨 ALERTA DE ATIVIDADE SUSPEITA DETECTADA! 🚨"
+            mentions = "@everyone"
+            footer_text = "⚠️ Verifique este jogador imediatamente!"
+        
         spam_embed = discord.Embed(
-            title="🚨 ALERTA DE ATIVIDADE SUSPEITA DETECTADA! 🚨",
-            color=0xFF0000  # Vermelho
+            title=titulo,
+            color=cor_embed
         )
         spam_embed.add_field(
             name="👤 Jogador",
@@ -402,27 +419,32 @@ async def on_message(message):
             value=f"{LOG_COUNT_THRESHOLD}x em {TIME_WINDOW_SECONDS}s",
             inline=True
         )
+        if vezes_alertado > 1:
+            spam_embed.add_field(
+                name="⚠️ REINCIDÊNCIA",
+                value=f"**Este jogador já foi alertado {vezes_alertado} vezes!**",
+                inline=False
+            )
         spam_embed.add_field(
             name="📋 Logs detectados",
             value="\n".join(logs_resumo),
             inline=False
         )
-        spam_embed.set_footer(text="⚠️ Verifique este jogador imediatamente!")
+        spam_embed.set_footer(text=footer_text)
         
         # Enviar alerta
         try:
             alert_channel = client.get_channel(ALERT_CHANNEL_ID)
             if alert_channel:
-                await alert_channel.send(content="@everyone", embed=spam_embed)
-                print(f"✅ Alerta enviado para canal: {ALERT_CHANNEL_ID}")
+                await alert_channel.send(content=mentions, embed=spam_embed)
+                print(f"✅ Alerta enviado para canal: {ALERT_CHANNEL_ID} ({vezes_alertado}ª vez)")
             else:
                 print(f"❌ Canal de alerta não encontrado: {ALERT_CHANNEL_ID}")
         except Exception as e:
             print(f"❌ ERRO ao enviar alerta: {e}")
         
-        # Limpar histórico desta chave após enviar alerta
-        if chave in log_history:
-            del log_history[chave]
+        # NÃO limpar histórico - permite novos alertas se continuar
+        # Apenas limpa entradas antigas na próxima iteração
 
 if TOKEN:
     client.run(TOKEN)
